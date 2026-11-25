@@ -63,3 +63,7 @@ logs/*.log
 todo.txt
 .ruff_cache
 .pytest_cache
+
+# newsbot pick workflow local data
+data/pick.db*
+data/pick-summaries/

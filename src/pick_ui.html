@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Horizon Pick</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1f24; --muted:#656d76; --line:#d8dee4; --accent:#0969da; --card:#f6f8fa; --good:#1a7f37; --bad:#cf222e; --warn:#9a6700; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --line:#30363d; --accent:#4493f8; --card:#161b22; --good:#3fb950; --bad:#f85149; --warn:#d29922; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,sans-serif; }
+  main { max-width:1150px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px; background:var(--card); border:1px solid var(--line); border-radius:8px; margin-bottom:12px; }
+  .bar label { color:var(--muted); font-size:13px; }
+  select, input[type=number], input[type=text], input[type=search] { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .spacer { flex:1; }
+  #status { min-height:22px; margin:6px 0 10px; color:var(--muted); }
+  #status.err { color:var(--bad); } #status.ok { color:var(--good); }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:13px; }
+  td.num, td.score, td.seen { white-space:nowrap; }
+  td.src, td.seen { color:var(--muted); font-size:13px; }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  details summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  details p { margin:6px 0 0; color:var(--muted); font-size:13px; }
+  .pill { display:inline-block; padding:0 8px; border-radius:10px; font-size:13px; border:1px solid var(--line); }
+  .hi { color:var(--good); border-color:var(--good); } .lo { color:var(--muted); } .stale { color:var(--warn); border-color:var(--warn); }
+  #summary { margin-top:18px; padding:12px; background:var(--card); border:1px solid var(--line); border-radius:8px; white-space:pre-wrap; word-break:break-word; display:none; }
+  @media (max-width:700px) { td.src, th.src, td.seen, th.seen { display:none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Horizon Pick <span id="total" class="pill lo"></span></h1>
+
+  <div class="bar">
+    <label>Hours <input id="hours" type="number" min="1" max="168" value="6" style="width:70px"></label>
+    <label>Sources <input id="sources" type="text" value="hackernews,rss" style="width:190px" title="comma-separated: hackernews, rss, github, reddit"></label>
+    <button id="fetchBtn">1. Fetch new titles</button>
+  </div>
+
+  <div class="bar">
+    <label>Show <select id="fStatus">
+      <option value="all">all</option><option value="unscored">unscored</option>
+      <option value="scored">scored</option><option value="stale">stale scores</option></select></label>
+    <label>Source <select id="fSource"><option value="">all</option></select></label>
+    <label>Seen <select id="fDays"><option value="">any time</option><option value="1">last day</option>
+      <option value="7">last 7 days</option><option value="30">last 30 days</option></select></label>
+    <label>Sort <select id="fSort"><option value="newest">newest</option><option value="oldest">oldest</option>
+      <option value="score">highest score</option></select></label>
+    <input id="fQuery" type="search" placeholder="search titles" style="width:170px">
+  </div>
+
+  <div class="bar">
+    <button class="secondary" id="allBtn">Select shown</button>
+    <button class="secondary" id="noneBtn">Clear</button>
+    <span id="count" class="pill">0 selected</span>
+    <span class="spacer"></span>
+    <button id="scoreBtn">2. Score selected</button>
+    <label><input type="checkbox" id="force"> re-score</label>
+    <button id="sumBtn">3. Summarize selected</button>
+    <label><input type="checkbox" id="enrich"> enrich</label>
+  </div>
+
+  <div id="status"></div>
+
+  <table>
+    <thead><tr><th></th><th>#</th><th class="seen">Seen</th><th class="src">Source</th><th>Title</th><th>Score</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div id="summaryBar" class="bar" style="display:none; margin-top:18px">
+    <label>Saved digests</label><select id="sumSel"></select>
+  </div>
+  <div id="summary"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { items: [], selected: new Set(), busy: false };
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Horizon-UI": "1" },
+    body: JSON.stringify(body),
+  };
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function setStatus(text, kind = "") { const s = $("status"); s.textContent = text; s.className = kind; }
+function setBusy(b, label) {
+  state.busy = b;
+  for (const id of ["fetchBtn", "scoreBtn", "sumBtn"]) $(id).disabled = b;
+  if (b) setStatus(label + " … (this can take a while)");
+}
+function updateCount() { $("count").textContent = state.selected.size + " selected"; }
+function seenLabel(iso) { return iso ? iso.slice(5, 16).replace("T", " ") : ""; }
+
+function render() {
+  const body = $("rows");
+  body.replaceChildren();
+  for (const it of state.items) {
+    const tr = document.createElement("tr");
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = state.selected.has(it.seq);
+    cb.addEventListener("change", () => { cb.checked ? state.selected.add(it.seq) : state.selected.delete(it.seq); updateCount(); });
+    const c0 = document.createElement("td"); c0.append(cb);
+
+    const c1 = document.createElement("td"); c1.className = "num"; c1.textContent = it.seq;
+    const c2 = document.createElement("td"); c2.className = "seen"; c2.textContent = seenLabel(it.first_seen);
+    const c3 = document.createElement("td"); c3.className = "src"; c3.textContent = it.source;
+
+    const c4 = document.createElement("td");
+    if (it.url) {
+      const a = document.createElement("a");
+      a.href = it.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = it.title;
+      c4.append(a);
+    } else { c4.textContent = it.title; }
+    const d = document.createElement("details");
+    const s = document.createElement("summary"); s.textContent = "why is this here?";
+    const box = document.createElement("div");
+    d.append(s, box);
+    d.addEventListener("toggle", async () => {
+      if (!d.open || box.childElementCount) return;
+      try {
+        const { steps } = await api("/api/trace/" + it.seq);
+        for (const st of steps) {
+          const p = document.createElement("p");
+          const b = document.createElement("b"); b.textContent = st.step + " [" + st.result + "] ";
+          p.append(b, document.createTextNode(st.detail)); box.append(p);
+        }
+      } catch (e) { box.textContent = e.message; }
+    });
+    c4.append(d);
+
+    const c5 = document.createElement("td"); c5.className = "score";
+    const pill = document.createElement("span"); pill.className = "pill";
+    if (it.state === "unscored") { pill.textContent = "—"; pill.classList.add("lo"); }
+    else {
+      pill.textContent = it.score === null ? "n/a" : it.score.toFixed(1);
+      if (it.state === "stale") { pill.textContent += " stale"; pill.classList.add("stale"); pill.title = "Scored with an older model or rubric"; }
+      else pill.classList.add(it.score !== null && it.score >= 7 ? "hi" : "lo");
+    }
+    c5.append(pill);
+
+    tr.append(c0, c1, c2, c3, c4, c5);
+    body.append(tr);
+  }
+  updateCount();
+}
+
+function filterQuery() {
+  const p = new URLSearchParams();
+  p.set("status", $("fStatus").value); p.set("sort", $("fSort").value);
+  if ($("fSource").value) p.set("source", $("fSource").value);
+  if ($("fDays").value) p.set("days", $("fDays").value);
+  if ($("fQuery").value.trim()) p.set("q", $("fQuery").value.trim());
+  return p.toString();
+}
+
+async function loadItems() {
+  const data = await api("/api/items?" + filterQuery());
+  state.items = data.items;
+  $("total").textContent = data.total + " in store";
+  const sel = $("fSource"), keep = sel.value;
+  sel.replaceChildren(new Option("all", ""));
+  for (const s of data.sources) sel.append(new Option(s, s));
+  sel.value = data.sources.includes(keep) ? keep : "";
+  render();
+  if (!data.items.length) setStatus(data.total ? "Nothing matches these filters." : "The store is empty. Fetch titles to begin.");
+}
+
+async function loadDigests(select) {
+  const { digests } = await api("/api/digests");
+  const sel = $("sumSel"); sel.replaceChildren();
+  $("summaryBar").style.display = digests.length ? "flex" : "none";
+  for (const d of digests) sel.append(new Option(d.replace("digest-", "").replace(".md", ""), d));
+  if (select) sel.value = select;
+}
+
+async function showDigest(name) {
+  const { markdown } = await api("/api/digest/" + encodeURIComponent(name));
+  const el = $("summary"); el.textContent = markdown; el.style.display = "block";
+  el.scrollIntoView({ behavior: "smooth" });
+}
+
+async function guarded(label, fn) {
+  if (state.busy) return;
+  setBusy(true, label);
+  try { await fn(); } catch (e) { setStatus(e.message, "err"); } finally { setBusy(false); }
+}
+
+function chosen() {
+  if (!state.selected.size) throw new Error("Select at least one title first.");
+  return [...state.selected].sort((a, b) => a - b);
+}
+
+$("fetchBtn").addEventListener("click", () => guarded("Fetching", async () => {
+  const sources = $("sources").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const r = await api("/api/fetch", { hours: parseInt($("hours").value, 10), sources: sources.length ? sources : null });
+  $("fStatus").value = "all"; $("fSort").value = "newest";
+  await loadItems();
+  const warn = r.failures.length ? ` Issues: ${r.failures.join("; ")}.` : "";
+  setStatus(`Fetched ${r.fetched}: ${r.added} new, ${r.duplicates} already in the store.${warn}`, r.fetched ? "ok" : "err");
+}));
+
+$("scoreBtn").addEventListener("click", () => guarded("Scoring", async () => {
+  const r = await api("/api/score", { seqs: chosen(), force: $("force").checked });
+  await loadItems();
+  setStatus(`Scored ${r.scored_now}, skipped ${r.skipped} already scored.`, "ok");
+}));
+
+$("sumBtn").addEventListener("click", () => guarded("Summarizing", async () => {
+  const r = await api("/api/summarize", { seqs: chosen(), enrich: $("enrich").checked });
+  await loadDigests(r.name);
+  await showDigest(r.name);
+  setStatus(`Digest built from ${r.items} item(s).`, "ok");
+}));
+
+for (const id of ["fStatus", "fSource", "fDays", "fSort"]) $(id).addEventListener("change", () => loadItems().catch((e) => setStatus(e.message, "err")));
+let timer; $("fQuery").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => loadItems().catch((e) => setStatus(e.message, "err")), 250); });
+$("sumSel").addEventListener("change", (e) => showDigest(e.target.value).catch((err) => setStatus(err.message, "err")));
+$("allBtn").addEventListener("click", () => { state.items.forEach((i) => state.selected.add(i.seq)); render(); });
+$("noneBtn").addEventListener("click", () => { state.selected.clear(); render(); });
+
+loadItems().then(() => loadDigests()).catch((e) => setStatus(e.message, "err"));
+</script>
+</body>
+</html>

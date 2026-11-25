@@ -43,6 +43,8 @@ twitter = [
 [project.scripts]
 horizon = "src.main:main"
 horizon-mcp = "src.mcp.server:main"
+horizon-pick = "src.pick:main"
+horizon-pick-ui = "src.pick_ui:main"
 horizon-wizard = "src.setup.wizard:main"
 horizon-chatgpt = "src.setup.chatgpt:main"
 horizon-webhook = "src.services.webhook_cli:main"
