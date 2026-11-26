@@ -16,8 +16,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import json
+import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,9 +31,10 @@ from rich.table import Table
 from ._cli import add_log_level_argument
 from .ai.summarizer import DailySummarizer
 from .mcp.errors import HorizonMcpError
-from .mcp.horizon_adapter import dicts_to_items, items_to_dicts
+from .mcp.horizon_adapter import dicts_to_items, get_enabled_sources, items_to_dicts
 from .mcp.service import HorizonPipelineService
-from .models import AIProvider
+from .models import SOURCE_REGISTRY, AIProvider, Config
+from .storage.manager import _expand_env_vars
 from .pick_store import PickStore
 
 out = Console()
@@ -170,6 +174,7 @@ class PickService(HorizonPipelineService):
         self.digest_dir.mkdir(parents=True, exist_ok=True)
         name = f"digest-{now.strftime('%Y%m%dT%H%M%S')}-{language}.md"
         (self.digest_dir / name).write_text(text, encoding="utf-8")
+        self._write_digest_data(name, rows, items, language, now)
         return {"name": name, "path": str((self.digest_dir / name).resolve()), "items": len(items), "language": language}
 
     def trace(self, seq: int) -> list[dict[str, str]]:
@@ -242,10 +247,113 @@ class PickService(HorizonPipelineService):
             })
         return steps
 
-    def list_digests(self) -> list[str]:
-        if not self.digest_dir.exists():
-            return []
-        return sorted((p.name for p in self.digest_dir.glob("digest-*.md") if _DIGEST_NAME.match(p.name)), reverse=True)
+    def _write_digest_data(self, name: str, rows: list[Any], items: list[Any], language: str, now: datetime) -> None:
+        """Structured copy of a digest so the UI can render cards instead of raw markdown."""
+        import json
+
+        entries = []
+        for row, item in zip(rows, items):
+            analysis = item.processing.analysis if item.processing and item.processing.analysis else None
+            url = str(item.url)
+            entries.append(
+                {
+                    "seq": row["seq"],
+                    "title": item.title,
+                    "url": url if url.startswith(("http://", "https://")) else "",
+                    "source": item.source_type.value,
+                    "feed": (item.metadata or {}).get("feed_name") or "",
+                    "published_at": item.published_at.isoformat() if item.published_at else None,
+                    "score": analysis.score if analysis else None,
+                    "summary": analysis.summary if analysis else "",
+                    "reason": analysis.reason if analysis else "",
+                    "tags": list(analysis.tags) if analysis else [],
+                }
+            )
+        data = {"name": name, "created_at": now.isoformat(timespec="seconds"), "language": language, "items": entries}
+        (self.digest_dir / name.replace(".md", ".json")).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    def read_digest_data(self, name: str) -> dict[str, Any] | None:
+        import json
+
+        if not _DIGEST_NAME.match(name):
+            raise ValueError("Invalid digest name")
+        path = self.digest_dir / name.replace(".md", ".json")
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def source_options(self, config: Config | None = None) -> list[dict[str, Any]]:
+        """Every source type Horizon supports, with whether it is enabled in your config."""
+        config = config or self._build_context(horizon_path=None, config_path=None, sources=None)[0].config
+        enabled = set(get_enabled_sources(config))
+        options = []
+        for name, definition in SOURCE_REGISTRY.items():
+            section = getattr(config.sources, definition.config_field, None)
+            if definition.config_is_list:
+                active = sum(1 for entry in section or [] if getattr(entry, "enabled", True))
+                detail = f"{active} configured" if active else ""
+            else:
+                entries = sum(len(getattr(section, f, None) or []) for f in definition.item_fields)
+                detail = f"{entries} configured" if entries else ""
+            options.append({"id": name, "enabled": name in enabled, "detail": detail})
+        return options
+
+    # -- configuration editor -------------------------------------------------------------
+
+    MAX_CONFIG_BYTES = 1_000_000
+    KEEP_BACKUPS = 20
+
+    def config_path(self) -> Path:
+        return self._build_context(horizon_path=None, config_path=None, sources=None)[0].config_path
+
+    def read_config_text(self) -> dict[str, str]:
+        path = self.config_path()
+        return {"path": str(path), "text": path.read_text(encoding="utf-8")}
+
+    @staticmethod
+    def check_config_text(text: str) -> dict[str, Any]:
+        """Parse and validate config text the same way Horizon loads it. Raises ValueError."""
+        if len(text.encode("utf-8")) > PickService.MAX_CONFIG_BYTES:
+            raise ValueError("Config is too large.")
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Not valid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno}).") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("The config must be a JSON object.")
+        try:
+            Config.model_validate(_expand_env_vars(parsed))
+        except Exception as exc:
+            errors = getattr(exc, "errors", None)
+            if callable(errors):
+                lines = [f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in errors()[:8]]
+                raise ValueError("Config rejected by Horizon:\n" + "\n".join(lines)) from exc
+            raise ValueError(f"Config rejected by Horizon: {exc}") from exc
+        return parsed
+
+    def save_config_text(self, text: str) -> dict[str, Any]:
+        """Validate, back up the current file, then replace it atomically."""
+        parsed = self.check_config_text(text)
+        path = self.config_path()
+        backups = self.data_dir / "config-backups"
+        backups.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        backup = backups / f"config-{stamp}.json"
+        if path.exists():
+            backup.write_bytes(path.read_bytes())
+
+        body = json.dumps(parsed, indent=2, ensure_ascii=False) + "\n"
+        fd, tmp = tempfile.mkstemp(prefix=".config.", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(body)
+            os.chmod(tmp, path.stat().st_mode & 0o777 if path.exists() else 0o600)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+
+        for old in sorted(backups.glob("config-*.json"))[: -self.KEEP_BACKUPS]:
+            old.unlink(missing_ok=True)
+        return {"saved": True, "backup": backup.name if backup.exists() else None, "text": body}
 
     def read_digest(self, name: str) -> str:
         if not _DIGEST_NAME.match(name):
@@ -309,7 +417,7 @@ async def run(args: argparse.Namespace) -> None:
         print_items(service.store.list_items(signature=service.signature(), status="unscored", limit=50))
     elif args.command == "list":
         rows = service.store.list_items(
-            signature=service.signature(), status=args.status, source=args.source, days=args.days,
+            signature=service.signature(), status=args.status, archived="any", source=args.source, days=args.days,
             query=args.search, sort=args.sort, limit=args.limit,
         )
         print_items(rows)

@@ -9,6 +9,7 @@ CLI and UI use to select items.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -34,7 +35,8 @@ CREATE TABLE IF NOT EXISTS items (
     score        REAL,
     reason       TEXT,
     scored_at    TEXT,
-    scored_sig   TEXT
+    scored_sig   TEXT,
+    archived     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS items_url_key ON items(url_key);
 CREATE INDEX IF NOT EXISTS items_first_seen ON items(first_seen);
@@ -61,6 +63,9 @@ class PickStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript(SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(items)")}
+            if "archived" not in columns:  # database created before archiving existed
+                conn.execute("ALTER TABLE items ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -111,6 +116,20 @@ class PickStore:
                 (json.dumps(scored), analysis.get("score"), analysis.get("reason"), _now(), signature, item_id),
             )
 
+    def set_archived(self, seqs: list[int], archived: bool) -> int:
+        if not seqs:
+            return 0
+        marks = ",".join("?" * len(seqs))
+        with self._conn() as conn:
+            cur = conn.execute(f"UPDATE items SET archived = ? WHERE seq IN ({marks})", [int(archived), *seqs])
+            return cur.rowcount
+
+    def archive_counts(self) -> dict[str, int]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT archived, COUNT(*) FROM items GROUP BY archived").fetchall()
+        counts = {int(flag): n for flag, n in rows}
+        return {"active": counts.get(0, 0), "archived": counts.get(1, 0)}
+
     def delete_unscored_older_than(self, days: int) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
         with self._conn() as conn:
@@ -127,18 +146,15 @@ class PickStore:
             rows = conn.execute(f"SELECT * FROM items WHERE seq IN ({marks}) ORDER BY seq", seqs).fetchall()
         return rows
 
-    def list_items(
-        self,
-        *,
-        signature: str,
-        status: str = "all",
-        source: str | None = None,
-        days: int | None = None,
-        query: str | None = None,
-        sort: str = "newest",
-        limit: int = 500,
-    ) -> list[dict[str, Any]]:
-        where, args = [], []
+    @staticmethod
+    def norm_tag(tag: str) -> str:
+        return tag.strip().lstrip("#").strip().lower()
+
+    def _filters(
+        self, signature: str, status: str, archived: str, source: str | None, days: int | None, query: str | None
+    ) -> tuple[list[str], list[Any]]:
+        where: list[str] = []
+        args: list[Any] = []
         if status == "unscored":
             where.append("scored_json IS NULL")
         elif status == "scored":
@@ -147,6 +163,10 @@ class PickStore:
         elif status == "stale":
             where.append("scored_json IS NOT NULL AND scored_sig IS NOT ?")
             args.append(signature)
+        if archived == "no":
+            where.append("archived = 0")
+        elif archived == "yes":
+            where.append("archived = 1")
         if source:
             where.append("source = ?")
             args.append(source)
@@ -158,6 +178,28 @@ class PickStore:
             where.append("title LIKE ? ESCAPE '\\'")
             escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             args.append(f"%{escaped}%")
+        return where, args
+
+    def list_items(
+        self,
+        *,
+        signature: str,
+        status: str = "all",
+        archived: str = "no",
+        source: str | None = None,
+        days: int | None = None,
+        query: str | None = None,
+        tags: list[str] | None = None,
+        sort: str = "newest",
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        where, args = self._filters(signature, status, archived, source, days, query)
+        for tag in tags or []:  # every chosen tag must be present (AND)
+            where.append(
+                "EXISTS (SELECT 1 FROM json_each(items.scored_json, '$.processing.analysis.tags') AS t"
+                " WHERE lower(ltrim(trim(t.value), '#')) = ?)"
+            )
+            args.append(self.norm_tag(tag))
         order = SORTS.get(sort, SORTS["newest"])
         sql = "SELECT * FROM items" + (" WHERE " + " AND ".join(where) if where else "")
         sql += f" ORDER BY {order} LIMIT ?"  # `order` comes from the fixed SORTS map
@@ -171,18 +213,68 @@ class PickStore:
             entry["all_sources"] = sources
         return out
 
+    def tag_facets(
+        self,
+        *,
+        signature: str,
+        status: str = "all",
+        archived: str = "no",
+        source: str | None = None,
+        days: int | None = None,
+        query: str | None = None,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        """Most common tags among the articles matching the other filters (tag filters excluded)."""
+        where, args = self._filters(signature, status, archived, source, days, query)
+        where.append("scored_json IS NOT NULL")
+        sql = "SELECT scored_json FROM items WHERE " + " AND ".join(where)
+        counts: dict[str, int] = {}
+        labels: dict[str, dict[str, int]] = {}
+        with self._conn() as conn:
+            for (blob,) in conn.execute(sql, args):
+                tags = ((json.loads(blob).get("processing") or {}).get("analysis") or {}).get("tags") or []
+                for tag in {self.norm_tag(str(t)): str(t).strip().lstrip("#") for t in tags}.items():
+                    key, shown = tag
+                    if not key:
+                        continue
+                    counts[key] = counts.get(key, 0) + 1
+                    labels.setdefault(key, {})[shown] = labels.setdefault(key, {}).get(shown, 0) + 1
+        top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+        return [{"tag": max(labels[k], key=labels[k].get), "key": k, "count": c} for k, c in top]
+
     @staticmethod
     def to_view(row: sqlite3.Row, signature: str) -> dict[str, Any]:
         scored = row["scored_json"] is not None
         state = "unscored" if not scored else ("scored" if row["scored_sig"] == signature else "stale")
         url = row["url"] if row["url"].startswith(("http://", "https://")) else ""
+
+        item = json.loads(row["item_json"])
+        meta = item.get("metadata") or {}
+        analysis = ((json.loads(row["scored_json"]).get("processing") or {}).get("analysis") or {}) if scored else {}
         return {
             "seq": row["seq"],
             "source": row["source"],
+            "feed": meta.get("feed_name") or meta.get("subreddit") or "",
             "title": row["title"],
             "url": url,
+            "published_at": row["published_at"],
             "first_seen": row["first_seen"],
             "state": state,
+            "archived": bool(row["archived"]),
             "score": row["score"],
             "reason": row["reason"],
+            "summary": analysis.get("summary") or "",
+            "tags": analysis.get("tags") or [],
+            "excerpt": _excerpt(item.get("content")),
         }
+
+
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _excerpt(content: str | None, limit: int = 240) -> str:
+    """Plain-text teaser of the fetched content (shown for articles not scored yet)."""
+    if not content:
+        return ""
+    text = " ".join(_TAG.sub(" ", content).split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "\u2026"

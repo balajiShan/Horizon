@@ -67,3 +67,4 @@ todo.txt
 # newsbot pick workflow local data
 data/pick.db*
 data/pick-summaries/
+data/config-backups/

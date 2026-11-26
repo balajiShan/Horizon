@@ -8,10 +8,12 @@
   :root { --bg:#fff; --fg:#1b1f24; --muted:#656d76; --line:#d8dee4; --accent:#0969da; --card:#f6f8fa; --good:#1a7f37; --bad:#cf222e; --warn:#9a6700; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --line:#30363d; --accent:#4493f8; --card:#161b22; --good:#3fb950; --bad:#f85149; --warn:#d29922; } }
   * { box-sizing: border-box; }
+  [hidden] { display:none !important; }
   body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,sans-serif; }
-  main { max-width:1150px; margin:0 auto; padding:16px; }
+  main { max-width:1600px; margin:0 auto; padding:16px; }
   h1 { font-size:20px; margin:0 0 12px; }
   .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px; background:var(--card); border:1px solid var(--line); border-radius:8px; margin-bottom:12px; }
+  .bar[hidden] { display:none; }
   .bar label { color:var(--muted); font-size:13px; }
   select, input[type=number], input[type=text], input[type=search] { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; }
   button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
@@ -20,28 +22,91 @@
   .spacer { flex:1; }
   #status { min-height:22px; margin:6px 0 10px; color:var(--muted); }
   #status.err { color:var(--bad); } #status.ok { color:var(--good); }
-  table { width:100%; border-collapse:collapse; }
-  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--muted); font-weight:600; font-size:13px; }
-  td.num, td.score, td.seen { white-space:nowrap; }
-  td.src, td.seen { color:var(--muted); font-size:13px; }
   a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
-  details summary { cursor:pointer; color:var(--muted); font-size:13px; }
-  details p { margin:6px 0 0; color:var(--muted); font-size:13px; }
+  .muted { color:var(--muted); font-size:13px; }
   .pill { display:inline-block; padding:0 8px; border-radius:10px; font-size:13px; border:1px solid var(--line); }
-  .hi { color:var(--good); border-color:var(--good); } .lo { color:var(--muted); } .stale { color:var(--warn); border-color:var(--warn); }
-  #summary { margin-top:18px; padding:12px; background:var(--card); border:1px solid var(--line); border-radius:8px; white-space:pre-wrap; word-break:break-word; display:none; }
-  @media (max-width:700px) { td.src, th.src, td.seen, th.seen { display:none; } }
+  .hi { color:var(--good); border-color:var(--good); } .lo { color:var(--muted); } .stale, .mid { color:var(--warn); border-color:var(--warn); }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; }
+  .card.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .card.archived { opacity:.7; }
+  .ctop { display:flex; gap:10px; align-items:flex-start; }
+  .ctop input[type=checkbox] { margin-top:4px; width:16px; height:16px; flex:none; cursor:pointer; }
+  .ctitle { font-weight:600; font-size:15px; line-height:1.35; flex:1; word-break:break-word; }
+  .score { font-weight:600; flex:none; }
+  .cmeta { color:var(--muted); font-size:12px; }
+  .csum { margin:0; font-size:14px; word-break:break-word; }
+  .csum.dim { color:var(--muted); }
+  .tags { display:flex; flex-wrap:wrap; gap:6px; }
+  button.tag { font-size:12px; color:var(--muted); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:0 8px; line-height:1.6; }
+  button.tag:hover { color:var(--accent); border-color:var(--accent); }
+  button.tag.on { color:#fff; background:var(--accent); border-color:var(--accent); }
+  button.tag .n { opacity:.7; margin-left:4px; }
+  .cfoot { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:auto; padding-top:6px; border-top:1px solid var(--line); }
+  .cfoot button { padding:2px 9px; font-size:12px; }
+  .cfoot .id { margin-left:auto; color:var(--muted); font-size:12px; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12px; }
+  details p { margin:6px 0 0; color:var(--muted); font-size:12px; }
+
+  #digest { margin-top:24px; } #digest[hidden] { display:none; }
+  .dhead { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
+  .dhead h2 { font-size:18px; margin:0; }
+  #rawWrap { margin-top:14px; } #rawWrap pre { margin:8px 0 0; padding:12px; background:var(--card); border:1px solid var(--line); border-radius:8px; white-space:pre-wrap; word-break:break-word; font-size:13px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  .tab { background:transparent; color:var(--muted); border:0; border-bottom:2px solid transparent; border-radius:0; padding:8px 14px; }
+  .tab.on { color:var(--fg); border-bottom-color:var(--accent); font-weight:600; }
+  #cfgText { width:100%; min-height:60vh; background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:12px; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; tab-size:2; resize:vertical; }
+  #cfgStatus { white-space:pre-wrap; margin:8px 0; min-height:22px; color:var(--muted); font-size:14px; }
+  #cfgStatus.err { color:var(--bad); } #cfgStatus.ok { color:var(--good); }
+  .help { margin-top:12px; } .help p { font-size:13px; } code { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  #tabPosts[hidden], #tabConfig[hidden] { display:none; }
+  .subtabs { display:flex; gap:8px; margin-bottom:12px; }
+  .subtab { background:var(--card); color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:5px 16px; }
+  .subtab.on { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+  .subtab .n { opacity:.8; margin-left:6px; font-weight:400; }
+  .field { display:flex; align-items:center; gap:8px; }
+  details.multi { position:relative; }
+  details.multi > summary { list-style:none; cursor:pointer; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 28px 5px 10px; font-size:15px; min-width:210px; position:relative; user-select:none; }
+  details.multi > summary::-webkit-details-marker { display:none; }
+  details.multi > summary::after { content:"▾"; position:absolute; right:10px; color:var(--muted); }
+  details.multi[open] > summary { border-color:var(--accent); }
+  .panel { position:absolute; z-index:20; top:calc(100% + 4px); left:0; min-width:260px; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+  .panel label.opt { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; color:var(--fg); font-size:14px; cursor:pointer; }
+  .panel label.opt:hover { background:var(--card); }
+  .panel label.opt.off { color:var(--muted); cursor:not-allowed; }
+  .panel label.opt .d { margin-left:auto; color:var(--muted); font-size:12px; }
+  .panel .pfoot { display:flex; gap:6px; padding:6px 4px 2px; border-top:1px solid var(--line); margin-top:4px; }
+  .panel .pfoot button { padding:2px 9px; font-size:12px; }
+  .empty { padding:32px; text-align:center; color:var(--muted); border:1px dashed var(--line); border-radius:10px; grid-column:1/-1; }
 </style>
 </head>
 <body>
 <main>
   <h1>Horizon Pick <span id="total" class="pill lo"></span></h1>
 
+  <nav class="tabs" role="tablist">
+    <button class="tab on" id="tabPostsBtn" role="tab" aria-selected="true">Posts</button>
+    <button class="tab" id="tabConfigBtn" role="tab" aria-selected="false">Configuration</button>
+  </nav>
+
+  <div id="tabPosts">
+
   <div class="bar">
     <label>Hours <input id="hours" type="number" min="1" max="168" value="6" style="width:70px"></label>
-    <label>Sources <input id="sources" type="text" value="hackernews,rss" style="width:190px" title="comma-separated: hackernews, rss, github, reddit"></label>
-    <button id="fetchBtn">1. Fetch new titles</button>
+    <div class="field">
+      <span class="muted">Sources</span>
+      <details class="multi" id="srcMulti">
+        <summary id="srcSummary">loading…</summary>
+        <div class="panel" id="srcPanel" role="group" aria-label="Sources to fetch"></div>
+      </details>
+    </div>
+    <button id="fetchBtn">Fetch new titles</button>
+  </div>
+
+  <div class="subtabs" id="viewTabs" role="tablist" aria-label="Which posts to show">
+    <button class="subtab on" data-view="no" role="tab" aria-selected="true">Active <span class="n" id="nActive">0</span></button>
+    <button class="subtab" data-view="yes" role="tab" aria-selected="false">Archived <span class="n" id="nArchived">0</span></button>
   </div>
 
   <div class="bar">
@@ -56,33 +121,84 @@
     <input id="fQuery" type="search" placeholder="search titles" style="width:170px">
   </div>
 
+  <div class="bar" id="tagBar" hidden>
+    <label>Tags</label>
+    <span class="tags" id="activeTags"></span>
+    <span class="spacer"></span>
+    <button class="secondary" id="clearTags">Clear tags</button>
+  </div>
+  <div class="bar" id="popular" hidden>
+    <label>Popular tags</label>
+    <span class="tags" id="popularTags"></span>
+  </div>
+
   <div class="bar">
     <button class="secondary" id="allBtn">Select shown</button>
     <button class="secondary" id="noneBtn">Clear</button>
     <span id="count" class="pill">0 selected</span>
     <span class="spacer"></span>
-    <button id="scoreBtn">2. Score selected</button>
+    <button class="secondary" id="archBtn">Archive selected</button>
+    <button id="scoreBtn">Score selected</button>
     <label><input type="checkbox" id="force"> re-score</label>
-    <button id="sumBtn">3. Summarize selected</button>
+    <button id="sumBtn">Summarize selected</button>
     <label><input type="checkbox" id="enrich"> enrich</label>
   </div>
 
   <div id="status"></div>
+  <div id="items" class="grid"></div>
 
-  <table>
-    <thead><tr><th></th><th>#</th><th class="seen">Seen</th><th class="src">Source</th><th>Title</th><th>Score</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
+  <section id="digest" hidden>
+    <div class="dhead">
+      <div><h2 id="dTitle"></h2><div id="dMeta" class="muted"></div></div>
+      <div><button class="secondary" id="copyMd">Copy markdown</button> <button class="secondary" id="closeDigest">Close</button></div>
+    </div>
+    <div id="cards" class="grid"></div>
+    <details id="rawWrap"><summary class="muted">Raw markdown</summary><pre id="raw"></pre></details>
+  </section>
+  </div><!-- /tabPosts -->
 
-  <div id="summaryBar" class="bar" style="display:none; margin-top:18px">
-    <label>Saved digests</label><select id="sumSel"></select>
+  <div id="tabConfig" hidden>
+    <div class="bar">
+      <span class="muted">Editing <code id="cfgPath"></code></span>
+      <span class="spacer"></span>
+      <span id="cfgDirty" class="pill stale" hidden>unsaved changes</span>
+    </div>
+
+    <div class="bar">
+      <label>Add RSS feed</label>
+      <input id="newFeedName" type="text" placeholder="name, e.g. Martin Fowler" style="width:200px">
+      <input id="newFeedUrl" type="text" placeholder="https://example.com/feed.xml" style="width:320px">
+      <button class="secondary" id="addFeed">Add to config</button>
+      <span class="muted">Adds to the text below. Press Save to apply it.</span>
+    </div>
+
+    <textarea id="cfgText" spellcheck="false" aria-label="Horizon configuration JSON"></textarea>
+
+    <div class="bar" style="margin-top:12px">
+      <button id="cfgSave">Save</button>
+      <button class="secondary" id="cfgValidate">Validate</button>
+      <button class="secondary" id="cfgFormat">Format</button>
+      <button class="secondary" id="cfgRevert">Revert to saved</button>
+    </div>
+    <div id="cfgStatus"></div>
+
+    <details class="help">
+      <summary>Where do I put my interests and topics?</summary>
+      <p>Not in this file. This file controls <b>where posts come from</b> (<code>sources</code>), <b>which AI model</b> runs
+      (<code>ai</code>), the <b>score cut-offs</b> (<code>processing</code>) and the digest layout. What counts as interesting is
+      decided by the <b>profiles</b>: <code>profiles/&lt;name&gt;/analysis.md</code> is the scoring rubric the AI follows, and
+      <code>match.md</code> says what content belongs to that profile. To score for your own niche, edit or add a profile, then
+      point your sources at it with <code>"profile": "&lt;name&gt;"</code>.</p>
+      <p>Every save keeps a timestamped backup in <code>data/config-backups/</code> (the last 20). Changes apply to your next
+      fetch or score; nothing needs restarting.</p>
+    </details>
   </div>
-  <div id="summary"></div>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { items: [], selected: new Set(), busy: false };
+const state = { items: [], selected: new Set(), tags: new Map(), view: "no", busy: false };  // view: "no" = active, "yes" = archived
+// tags below: key -> display label  // tags: key -> display label
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
@@ -96,6 +212,12 @@ async function api(path, body) {
   return data;
 }
 
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
 function setStatus(text, kind = "") { const s = $("status"); s.textContent = text; s.className = kind; }
 function setBusy(b, label) {
   state.busy = b;
@@ -103,137 +225,385 @@ function setBusy(b, label) {
   if (b) setStatus(label + " … (this can take a while)");
 }
 function updateCount() { $("count").textContent = state.selected.size + " selected"; }
-function seenLabel(iso) { return iso ? iso.slice(5, 16).replace("T", " ") : ""; }
+function when(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) { const t = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = t), 1200); }
+    return true;
+  } catch (e) { setStatus("Copy failed: " + e.message, "err"); return false; }
+}
 
-function render() {
-  const body = $("rows");
-  body.replaceChildren();
-  for (const it of state.items) {
-    const tr = document.createElement("tr");
+/* ---- tags as filters ---- */
+const tagKey = (t) => String(t).replace(/^#+/, "").trim().toLowerCase();
 
-    const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.checked = state.selected.has(it.seq);
-    cb.addEventListener("change", () => { cb.checked ? state.selected.add(it.seq) : state.selected.delete(it.seq); updateCount(); });
-    const c0 = document.createElement("td"); c0.append(cb);
+function tagButton(label, extra) {
+  const key = tagKey(label);
+  const b = el("button", "tag" + (state.tags.has(key) ? " on" : ""), "#" + String(label).replace(/^#+/, ""));
+  if (extra !== undefined) b.append(el("span", "n", String(extra)));
+  b.type = "button";
+  b.title = state.tags.has(key) ? "Remove this tag filter" : "Show only items with this tag";
+  b.addEventListener("click", () => toggleTag(key, String(label).replace(/^#+/, "")));
+  return b;
+}
+function tagList(tags) {
+  const box = el("div", "tags");
+  for (const t of tags) box.append(tagButton(t));
+  return box;
+}
+async function toggleTag(key, label) {
+  state.tags.has(key) ? state.tags.delete(key) : state.tags.set(key, label);
+  try { await loadItems(); window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { setStatus(e.message, "err"); }
+}
+function renderTagBars(facets) {
+  const bar = $("tagBar"), active = $("activeTags");
+  active.replaceChildren();
+  for (const [key, label] of state.tags) active.append(tagButton(label));
+  bar.hidden = state.tags.size === 0;
 
-    const c1 = document.createElement("td"); c1.className = "num"; c1.textContent = it.seq;
-    const c2 = document.createElement("td"); c2.className = "seen"; c2.textContent = seenLabel(it.first_seen);
-    const c3 = document.createElement("td"); c3.className = "src"; c3.textContent = it.source;
+  const pop = $("popularTags"); pop.replaceChildren();
+  for (const f of facets) pop.append(tagButton(f.tag, f.count));
+  $("popular").hidden = facets.length === 0;
+}
 
-    const c4 = document.createElement("td");
-    if (it.url) {
-      const a = document.createElement("a");
-      a.href = it.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = it.title;
-      c4.append(a);
-    } else { c4.textContent = it.title; }
-    const d = document.createElement("details");
-    const s = document.createElement("summary"); s.textContent = "why is this here?";
-    const box = document.createElement("div");
-    d.append(s, box);
-    d.addEventListener("toggle", async () => {
-      if (!d.open || box.childElementCount) return;
-      try {
-        const { steps } = await api("/api/trace/" + it.seq);
-        for (const st of steps) {
-          const p = document.createElement("p");
-          const b = document.createElement("b"); b.textContent = st.step + " [" + st.result + "] ";
-          p.append(b, document.createTextNode(st.detail)); box.append(p);
-        }
-      } catch (e) { box.textContent = e.message; }
-    });
-    c4.append(d);
+/* ---- posting: opens the platform's own compose window; you press Post there ---- */
+function clip(text, max) { return text.length <= max ? text : text.slice(0, max - 1).trimEnd() + "…"; }
+function draftText(it) {
+  const body = (it.summary || it.excerpt || "").trim();
+  return body ? `${it.title}\n\n${body}` : it.title;
+}
+function shareX(it) {
+  if (!it.url) return setStatus("This item has no link to share.", "err");
+  const text = clip(it.summary && it.title.length < 160 ? `${it.title} — ${it.summary}` : it.title, 250);
+  const u = "https://x.com/intent/post?text=" + encodeURIComponent(text) + "&url=" + encodeURIComponent(it.url);
+  window.open(u, "_blank", "noopener,noreferrer");
+  setStatus("Opened X's compose window. Edit the text and press Post there.", "ok");
+}
+function shareLinkedIn(it) {
+  if (!it.url) return setStatus("This item has no link to share.", "err");
+  window.open("https://www.linkedin.com/sharing/share-offsite/?url=" + encodeURIComponent(it.url), "_blank", "noopener,noreferrer");
+  copyText(`${draftText(it)}\n\n${it.url}`).then((ok) =>
+    setStatus(ok ? "Opened LinkedIn. The draft text is copied: paste it into the post box, edit, then press Post."
+                 : "Opened LinkedIn, but the draft could not be copied automatically. Use “Copy text” on the card.", ok ? "ok" : "err"));
+}
+function postButtons(it) {
+  const frag = document.createDocumentFragment();
+  const li = el("button", "secondary", "Post to LinkedIn"); li.addEventListener("click", () => shareLinkedIn(it));
+  const x = el("button", "secondary", "Post to X"); x.addEventListener("click", () => shareX(it));
+  const cp = el("button", "secondary", "Copy text"); cp.addEventListener("click", () => copyText(`${draftText(it)}${it.url ? "\n\n" + it.url : ""}`, cp));
+  frag.append(li, x, cp);
+  return frag;
+}
 
-    const c5 = document.createElement("td"); c5.className = "score";
-    const pill = document.createElement("span"); pill.className = "pill";
-    if (it.state === "unscored") { pill.textContent = "—"; pill.classList.add("lo"); }
-    else {
-      pill.textContent = it.score === null ? "n/a" : it.score.toFixed(1);
-      if (it.state === "stale") { pill.textContent += " stale"; pill.classList.add("stale"); pill.title = "Scored with an older model or rubric"; }
-      else pill.classList.add(it.score !== null && it.score >= 7 ? "hi" : "lo");
-    }
-    c5.append(pill);
-
-    tr.append(c0, c1, c2, c3, c4, c5);
-    body.append(tr);
+/* ---- item cards ---- */
+function scorePill(it) {
+  const pill = el("span", "pill score");
+  if (it.state === "unscored") { pill.textContent = "not scored"; pill.classList.add("lo"); }
+  else {
+    pill.textContent = it.score === null || it.score === undefined ? "n/a" : it.score.toFixed(1);
+    if (it.state === "stale") { pill.textContent += " stale"; pill.classList.add("stale"); pill.title = "Scored with an older model or rubric"; }
+    else pill.classList.add(it.score >= 7 ? "hi" : it.score >= 5 ? "mid" : "lo");
   }
+  return pill;
+}
+function titleNode(it) {
+  if (it.url) {
+    const a = el("a", "ctitle", it.title);
+    a.href = it.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    return a;
+  }
+  return el("span", "ctitle", it.title);
+}
+function tracePanel(it) {
+  const d = el("details");
+  const box = el("div");
+  d.append(el("summary", "", "why is this here?"), box);
+  d.addEventListener("toggle", async () => {
+    if (!d.open || box.childElementCount) return;
+    try {
+      const { steps } = await api("/api/trace/" + it.seq);
+      for (const st of steps) {
+        const p = el("p"); const b = el("b", "", st.step + " [" + st.result + "] ");
+        p.append(b, document.createTextNode(st.detail)); box.append(p);
+      }
+    } catch (e) { box.textContent = e.message; }
+  });
+  return d;
+}
+function itemCard(it) {
+  const c = el("article", "card" + (state.selected.has(it.seq) ? " selected" : "") + (it.archived ? " archived" : ""));
+
+  const top = el("div", "ctop");
+  const cb = el("input"); cb.type = "checkbox"; cb.checked = state.selected.has(it.seq);
+  cb.setAttribute("aria-label", "Select " + it.title);
+  cb.addEventListener("change", () => {
+    cb.checked ? state.selected.add(it.seq) : state.selected.delete(it.seq);
+    c.classList.toggle("selected", cb.checked); updateCount();
+  });
+  top.append(cb, titleNode(it), scorePill(it));
+  c.append(top);
+
+  c.append(el("div", "cmeta", [it.feed || it.source, it.published_at ? "published " + when(it.published_at) : "seen " + when(it.first_seen)].filter(Boolean).join(" · ")));
+  const text = it.summary || it.excerpt;
+  if (text) c.append(el("p", "csum" + (it.summary ? "" : " dim"), text));
+  if (it.tags && it.tags.length) c.append(tagList(it.tags));
+  c.append(tracePanel(it));
+
+  const foot = el("div", "cfoot");
+  const arch = el("button", "secondary", it.archived ? "Unarchive" : "Archive");
+  arch.addEventListener("click", () => setArchived([it.seq], !it.archived));
+  foot.append(arch, postButtons(it), el("span", "id", "#" + it.seq));
+  c.append(foot);
+  return c;
+}
+function renderItems() {
+  const box = $("items");
+  box.replaceChildren();
+  if (!state.items.length) box.append(el("div", "empty", "Nothing to show here."));
+  for (const it of state.items) box.append(itemCard(it));
   updateCount();
 }
 
 function filterQuery() {
   const p = new URLSearchParams();
-  p.set("status", $("fStatus").value); p.set("sort", $("fSort").value);
+  p.set("status", $("fStatus").value); p.set("sort", $("fSort").value); p.set("archived", state.view);
   if ($("fSource").value) p.set("source", $("fSource").value);
   if ($("fDays").value) p.set("days", $("fDays").value);
   if ($("fQuery").value.trim()) p.set("q", $("fQuery").value.trim());
+  for (const key of state.tags.keys()) p.append("tag", key);
   return p.toString();
 }
-
 async function loadItems() {
   const data = await api("/api/items?" + filterQuery());
   state.items = data.items;
   $("total").textContent = data.total + " in store";
+  $("nActive").textContent = data.counts.active; $("nArchived").textContent = data.counts.archived;
   const sel = $("fSource"), keep = sel.value;
   sel.replaceChildren(new Option("all", ""));
   for (const s of data.sources) sel.append(new Option(s, s));
   sel.value = data.sources.includes(keep) ? keep : "";
-  render();
+  renderTagBars(data.tag_facets || []);
+  renderItems();
   if (!data.items.length) setStatus(data.total ? "Nothing matches these filters." : "The store is empty. Fetch titles to begin.");
+  else if ($("status").className === "") setStatus("");
+}
+async function setArchived(seqs, archived) {
+  try {
+    const r = await api("/api/archive", { seqs, archived });
+    seqs.forEach((s) => state.selected.delete(s));
+    await loadItems();
+    setStatus(`${archived ? "Archived" : "Restored"} ${r.changed} item(s).` + (archived ? " Open the “Archived” tab above the filters to bring them back." : ""), "ok");
+  } catch (e) { setStatus(e.message, "err"); }
 }
 
-async function loadDigests(select) {
-  const { digests } = await api("/api/digests");
-  const sel = $("sumSel"); sel.replaceChildren();
-  $("summaryBar").style.display = digests.length ? "flex" : "none";
-  for (const d of digests) sel.append(new Option(d.replace("digest-", "").replace(".md", ""), d));
-  if (select) sel.value = select;
+/* ---- digests ---- */
+function digestCard(it) {
+  const c = el("article", "card");
+  const top = el("div", "ctop");
+  top.append(titleNode(it));
+  const sc = el("span", "pill score", it.score === null || it.score === undefined ? "n/a" : it.score.toFixed(1));
+  sc.classList.add(it.score >= 7 ? "hi" : it.score >= 5 ? "mid" : "lo");
+  top.append(sc); c.append(top);
+  c.append(el("div", "cmeta", [it.feed || it.source, when(it.published_at)].filter(Boolean).join(" · ")));
+  if (it.summary) c.append(el("p", "csum", it.summary));
+  if (it.tags && it.tags.length) c.append(tagList(it.tags));
+  const foot = el("div", "cfoot");
+  foot.append(postButtons(it), el("span", "id", "#" + it.seq));
+  c.append(foot);
+  return c;
 }
-
 async function showDigest(name) {
-  const { markdown } = await api("/api/digest/" + encodeURIComponent(name));
-  const el = $("summary"); el.textContent = markdown; el.style.display = "block";
-  el.scrollIntoView({ behavior: "smooth" });
+  const { markdown, data } = await api("/api/digest/" + encodeURIComponent(name));
+  const box = $("cards"); box.replaceChildren();
+  if (data && data.items) {
+    const items = [...data.items].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    $("dTitle").textContent = `Digest · ${items.length} item${items.length === 1 ? "" : "s"}`;
+    $("dMeta").textContent = [when(data.created_at), data.language, items.length ? "top score " + (items[0].score ?? "n/a") : ""].filter(Boolean).join(" · ");
+    for (const it of items) box.append(digestCard(it));
+  } else {
+    $("dTitle").textContent = "Digest";
+    $("dMeta").textContent = "Older digest: structured view not available, showing raw markdown below.";
+    $("rawWrap").open = true;
+  }
+  $("raw").textContent = markdown;
+  $("copyMd").onclick = () => copyText(markdown, $("copyMd"));
+  $("digest").hidden = false;
+  $("digest").scrollIntoView({ behavior: "smooth" });
 }
 
+/* ---- actions ---- */
 async function guarded(label, fn) {
   if (state.busy) return;
   setBusy(true, label);
   try { await fn(); } catch (e) { setStatus(e.message, "err"); } finally { setBusy(false); }
 }
-
 function chosen() {
-  if (!state.selected.size) throw new Error("Select at least one title first.");
+  if (!state.selected.size) throw new Error("Tick at least one box first.");
   return [...state.selected].sort((a, b) => a - b);
 }
 
 $("fetchBtn").addEventListener("click", () => guarded("Fetching", async () => {
-  const sources = $("sources").value.split(",").map((s) => s.trim()).filter(Boolean);
-  const r = await api("/api/fetch", { hours: parseInt($("hours").value, 10), sources: sources.length ? sources : null });
-  $("fStatus").value = "all"; $("fSort").value = "newest";
+  if (!src.chosen.size) throw new Error("Pick at least one source first.");
+  $("srcMulti").open = false;
+  const r = await api("/api/fetch", { hours: parseInt($("hours").value, 10), sources: [...src.chosen].sort() });
+  $("fStatus").value = "all"; $("fSort").value = "newest"; setView("no"); state.tags.clear();
   await loadItems();
   const warn = r.failures.length ? ` Issues: ${r.failures.join("; ")}.` : "";
   setStatus(`Fetched ${r.fetched}: ${r.added} new, ${r.duplicates} already in the store.${warn}`, r.fetched ? "ok" : "err");
 }));
-
 $("scoreBtn").addEventListener("click", () => guarded("Scoring", async () => {
   const r = await api("/api/score", { seqs: chosen(), force: $("force").checked });
   await loadItems();
   setStatus(`Scored ${r.scored_now}, skipped ${r.skipped} already scored.`, "ok");
 }));
-
 $("sumBtn").addEventListener("click", () => guarded("Summarizing", async () => {
   const r = await api("/api/summarize", { seqs: chosen(), enrich: $("enrich").checked });
-  await loadDigests(r.name);
   await showDigest(r.name);
   setStatus(`Digest built from ${r.items} item(s).`, "ok");
 }));
+$("archBtn").addEventListener("click", () => {
+  try { setArchived(chosen(), state.view !== "yes"); } catch (e) { setStatus(e.message, "err"); }
+});
+$("clearTags").addEventListener("click", () => { state.tags.clear(); loadItems().catch((e) => setStatus(e.message, "err")); });
 
-for (const id of ["fStatus", "fSource", "fDays", "fSort"]) $(id).addEventListener("change", () => loadItems().catch((e) => setStatus(e.message, "err")));
+for (const id of ["fStatus", "fSource", "fDays", "fSort"]) {
+  $(id).addEventListener("change", () => {
+    loadItems().catch((e) => setStatus(e.message, "err"));
+  });
+}
 let timer; $("fQuery").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => loadItems().catch((e) => setStatus(e.message, "err")), 250); });
-$("sumSel").addEventListener("change", (e) => showDigest(e.target.value).catch((err) => setStatus(err.message, "err")));
-$("allBtn").addEventListener("click", () => { state.items.forEach((i) => state.selected.add(i.seq)); render(); });
-$("noneBtn").addEventListener("click", () => { state.selected.clear(); render(); });
+$("closeDigest").addEventListener("click", () => { $("digest").hidden = true; });
+$("allBtn").addEventListener("click", () => { state.items.forEach((i) => state.selected.add(i.seq)); renderItems(); });
+$("noneBtn").addEventListener("click", () => { state.selected.clear(); renderItems(); });
 
-loadItems().then(() => loadDigests()).catch((e) => setStatus(e.message, "err"));
+loadItems().catch((e) => setStatus(e.message, "err"));
+loadSources().catch((e) => { $("srcSummary").textContent = "unavailable"; setStatus(e.message, "err"); });
+
+/* ---- source picker (multi-select built from your config) ---- */
+const SRC_KEY = "horizonPickSources";
+const src = { options: [], chosen: new Set() };
+function srcSave() { try { localStorage.setItem(SRC_KEY, JSON.stringify([...src.chosen])); } catch (e) { /* private mode: fine */ } }
+function srcSaved() { try { return JSON.parse(localStorage.getItem(SRC_KEY) || "null"); } catch (e) { return null; } }
+function srcRenderSummary() {
+  const names = [...src.chosen].sort();
+  $("srcSummary").textContent = names.length ? `${names.length} selected: ${names.join(", ")}` : "none selected";
+}
+function srcRenderPanel() {
+  const panel = $("srcPanel"); panel.replaceChildren();
+  for (const o of src.options) {
+    const row = el("label", "opt" + (o.enabled ? "" : " off"));
+    const cb = el("input"); cb.type = "checkbox"; cb.value = o.id; cb.disabled = !o.enabled; cb.checked = src.chosen.has(o.id);
+    cb.addEventListener("change", () => { cb.checked ? src.chosen.add(o.id) : src.chosen.delete(o.id); srcSave(); srcRenderSummary(); });
+    row.title = o.enabled ? "" : "Disabled in your configuration. Enable it on the Configuration tab to use it.";
+    row.append(cb, document.createTextNode(o.id), el("span", "d", o.enabled ? o.detail : "disabled"));
+    panel.append(row);
+  }
+  const foot = el("div", "pfoot");
+  const all = el("button", "secondary", "All enabled"); all.type = "button";
+  all.addEventListener("click", () => { src.chosen = new Set(src.options.filter((o) => o.enabled).map((o) => o.id)); srcSave(); srcRenderPanel(); srcRenderSummary(); });
+  const none = el("button", "secondary", "None"); none.type = "button";
+  none.addEventListener("click", () => { src.chosen.clear(); srcSave(); srcRenderPanel(); srcRenderSummary(); });
+  foot.append(all, none); panel.append(foot);
+}
+async function loadSources() {
+  const { sources } = await api("/api/sources");
+  src.options = sources;
+  const enabled = new Set(sources.filter((o) => o.enabled).map((o) => o.id));
+  const saved = srcSaved();
+  let chosen = saved ? saved.filter((id) => enabled.has(id)) : [];
+  if (!chosen.length) {                       // first visit: the two sources that need no keys or logins
+    chosen = ["hackernews", "rss"].filter((id) => enabled.has(id));
+    if (!chosen.length) chosen = [...enabled];
+  }
+  src.chosen = new Set(chosen);
+  srcRenderPanel(); srcRenderSummary();
+}
+document.addEventListener("click", (e) => { const d = $("srcMulti"); if (d.open && !d.contains(e.target)) d.open = false; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("srcMulti").open = false; });
+
+/* ---- Active / Archived tabs ---- */
+function setView(view) {
+  state.view = view;
+  for (const b of document.querySelectorAll("#viewTabs .subtab")) {
+    const on = b.dataset.view === view;
+    b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on));
+  }
+  $("archBtn").textContent = view === "yes" ? "Unarchive selected" : "Archive selected";
+}
+for (const b of document.querySelectorAll("#viewTabs .subtab")) {
+  b.addEventListener("click", () => {
+    if (state.view === b.dataset.view) return;
+    setView(b.dataset.view); state.selected.clear();
+    loadItems().catch((e) => setStatus(e.message, "err"));
+  });
+}
+
+/* ---- tabs + configuration editor ---- */
+const cfg = { loaded: "", ready: false };
+function showTab(name) {
+  const config = name === "config";
+  $("tabPosts").hidden = config; $("tabConfig").hidden = !config;
+  $("tabPostsBtn").classList.toggle("on", !config); $("tabConfigBtn").classList.toggle("on", config);
+  $("tabPostsBtn").setAttribute("aria-selected", String(!config)); $("tabConfigBtn").setAttribute("aria-selected", String(config));
+  history.replaceState(null, "", config ? "#config" : "#");
+  if (config && !cfg.ready) loadConfig();
+}
+function cfgSay(text, kind = "") { const s = $("cfgStatus"); s.textContent = text; s.className = kind; }
+function cfgDirty() { $("cfgDirty").hidden = $("cfgText").value === cfg.loaded; }
+async function loadConfig() {
+  try {
+    const r = await api("/api/config");
+    $("cfgPath").textContent = r.path; $("cfgText").value = r.text; cfg.loaded = r.text; cfg.ready = true; cfgDirty(); cfgSay("");
+  } catch (e) { cfgSay(e.message, "err"); }
+}
+function parseCfg() {
+  try { return JSON.parse($("cfgText").value); }
+  catch (e) { throw new Error("Not valid JSON yet: " + e.message); }
+}
+async function cfgCall(dry) {
+  return api("/api/config", { text: $("cfgText").value, dry_run: dry });
+}
+$("tabPostsBtn").addEventListener("click", () => showTab("posts"));
+$("tabConfigBtn").addEventListener("click", () => showTab("config"));
+$("cfgText").addEventListener("input", cfgDirty);
+$("cfgValidate").addEventListener("click", async () => {
+  try { await cfgCall(true); cfgSay("Valid: Horizon accepts this configuration.", "ok"); } catch (e) { cfgSay(e.message, "err"); }
+});
+$("cfgSave").addEventListener("click", async () => {
+  try {
+    const r = await cfgCall(false);
+    $("cfgText").value = r.text; cfg.loaded = r.text; cfgDirty();
+    loadSources().catch(() => {});
+    cfgSay("Saved." + (r.backup ? " Previous version kept as data/config-backups/" + r.backup + "." : "") + " It applies to your next fetch or score.", "ok");
+  } catch (e) { cfgSay(e.message, "err"); }
+});
+$("cfgFormat").addEventListener("click", () => {
+  try { $("cfgText").value = JSON.stringify(parseCfg(), null, 2) + "\n"; cfgDirty(); cfgSay("Formatted.", "ok"); } catch (e) { cfgSay(e.message, "err"); }
+});
+$("cfgRevert").addEventListener("click", () => { $("cfgText").value = cfg.loaded; cfgDirty(); cfgSay("Reverted to the saved version."); });
+$("addFeed").addEventListener("click", () => {
+  try {
+    const name = $("newFeedName").value.trim(), url = $("newFeedUrl").value.trim();
+    if (!name) throw new Error("Give the feed a name.");
+    let u; try { u = new URL(url); } catch { throw new Error("Enter a full feed URL starting with https://"); }
+    if (!["http:", "https:"].includes(u.protocol)) throw new Error("The feed URL must start with http:// or https://");
+    const c = parseCfg();
+    c.sources = c.sources || {}; c.sources.rss = c.sources.rss || [];
+    if (c.sources.rss.some((f) => f.url === url)) throw new Error("That feed is already in the config.");
+    const template = c.sources.rss.length ? { ...c.sources.rss[0] } : { enabled: true, category: "" };
+    c.sources.rss.push({ ...template, name, url, enabled: true });
+    $("cfgText").value = JSON.stringify(c, null, 2) + "\n"; cfgDirty();
+    $("newFeedName").value = ""; $("newFeedUrl").value = "";
+    cfgSay(`Added “${name}” at the end of sources.rss. Review it, then press Save.`, "ok");
+    $("cfgText").scrollTop = $("cfgText").scrollHeight;
+  } catch (e) { cfgSay(e.message, "err"); }
+});
+window.addEventListener("beforeunload", (e) => { if (cfg.ready && $("cfgText").value !== cfg.loaded) { e.preventDefault(); e.returnValue = ""; } });
+if (location.hash === "#config") showTab("config");
 </script>
 </body>
 </html>

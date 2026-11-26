@@ -22,12 +22,13 @@ from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
 from .mcp.errors import HorizonMcpError
+from .mcp.horizon_adapter import VALID_SOURCES
 from .pick import PickService
 
 _ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 _LANG_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
-_SOURCES = {"github", "hackernews", "rss", "reddit", "telegram", "twitter", "gdelt", "google_news", "ossinsight", "openbb"}
 _STATUSES = {"all", "unscored", "scored", "stale"}
+_ARCHIVED = {"no", "yes", "any"}
 
 _lock = asyncio.Lock()  # one fetch/AI job at a time: prevents double-click double spend
 _service: PickService | None = None
@@ -93,22 +94,29 @@ async def items(request: Request) -> JSONResponse:
     status = q.get("status", "all")
     sort = q.get("sort", "newest")
     source = q.get("source") or None
-    if status not in _STATUSES or sort not in {"newest", "oldest", "score"}:
+    archived = q.get("archived", "no")
+    if status not in _STATUSES or sort not in {"newest", "oldest", "score"} or archived not in _ARCHIVED:
         return _error("Bad filter")
     try:
         days = int(q["days"]) if q.get("days") else None
     except ValueError:
         return _error("Bad days")
-    rows = service().store.list_items(
-        signature=service().signature(), status=status, source=source, days=days,
-        query=(q.get("q") or "")[:200] or None, sort=sort, limit=1000,
+    tags = [t for t in q.getlist("tag") if t.strip()]
+    if len(tags) > 5 or any(len(t) > 64 for t in tags):
+        return _error("Too many or too long tag filters")
+    signature = service().signature()
+    base = dict(
+        signature=signature, status=status, archived=archived, source=source, days=days,
+        query=(q.get("q") or "")[:200] or None,
     )
+    rows = service().store.list_items(**base, tags=tags, sort=sort, limit=1000)
+    facets = service().store.tag_facets(**base)
     sources = rows[0]["all_sources"] if rows else []
     total = rows[0]["total_in_store"] if rows else 0
     for row in rows:
         row.pop("all_sources", None)
         row.pop("total_in_store", None)
-    return JSONResponse({"items": rows, "sources": sources, "total": total})
+    return JSONResponse({"items": rows, "sources": sources, "total": total, "tag_facets": facets, "counts": service().store.archive_counts()})
 
 
 async def trace(request: Request) -> JSONResponse:
@@ -120,19 +128,32 @@ async def trace(request: Request) -> JSONResponse:
         return _error(str(exc), 404)
 
 
-async def digests(request: Request) -> JSONResponse:
-    if (blocked := await _guard(request)) is not None:
-        return blocked
-    return JSONResponse({"digests": service().list_digests()})
-
-
 async def digest(request: Request) -> JSONResponse:
     if (blocked := await _guard(request)) is not None:
         return blocked
     try:
-        return JSONResponse({"markdown": service().read_digest(request.path_params["name"])})
+        name = request.path_params["name"]
+        return JSONResponse({"markdown": service().read_digest(name), "data": service().read_digest_data(name)})
     except (ValueError, FileNotFoundError) as exc:
         return _error(str(exc), 404)
+
+
+async def sources(request: Request) -> JSONResponse:
+    if (blocked := await _guard(request)) is not None:
+        return blocked
+    try:
+        return JSONResponse({"sources": service().source_options()})
+    except Exception as exc:
+        return _error(f"{type(exc).__name__}: {exc}", 500)
+
+
+async def get_config(request: Request) -> JSONResponse:
+    if (blocked := await _guard(request)) is not None:
+        return blocked
+    try:
+        return JSONResponse(service().read_config_text())
+    except Exception as exc:
+        return _error(f"{type(exc).__name__}: {exc}", 500)
 
 
 async def _job(request: Request, work) -> JSONResponse:
@@ -155,15 +176,44 @@ async def _job(request: Request, work) -> JSONResponse:
             return _error(f"{type(exc).__name__}: {exc}", 500)
 
 
+async def archive(request: Request) -> JSONResponse:
+    """Hide or restore articles. A quick local DB change, so it does not wait for fetch/AI jobs."""
+    if (blocked := await _guard(request)) is not None:
+        return blocked
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Bad request body")
+        count = service().store.set_archived(_seqs(body.get("seqs")), bool(body.get("archived", True)))
+    except ValueError as exc:
+        return _error(str(exc))
+    return JSONResponse({"changed": count})
+
+
+async def save_config(request: Request) -> JSONResponse:
+    async def work(body: dict) -> dict:
+        text = body.get("text")
+        if not isinstance(text, str):
+            raise ValueError("Missing config text")
+        if body.get("dry_run"):
+            service().check_config_text(text)
+            return {"valid": True}
+        return service().save_config_text(text)
+
+    return await _job(request, work)
+
+
 async def fetch(request: Request) -> JSONResponse:
     async def work(body: dict) -> dict:
         hours = body.get("hours", 24)
         if isinstance(hours, bool) or not isinstance(hours, int) or not 1 <= hours <= 168:
             raise ValueError("hours must be 1-168")
-        sources = body.get("sources") or None
-        if sources is not None and (not isinstance(sources, list) or not set(sources) <= _SOURCES):
-            raise ValueError("Unknown source")
-        return await service().fetch_to_store(hours, sources)
+        sources = body.get("sources")
+        # An empty list would mean "everything" downstream, so it is rejected rather than defaulted.
+        if not isinstance(sources, list) or not sources or not all(isinstance(s, str) for s in sources) \
+                or not set(sources) <= VALID_SOURCES:
+            raise ValueError("Choose at least one valid source.")
+        return await service().fetch_to_store(hours, sorted(set(sources)))
 
     return await _job(request, work)
 
@@ -189,8 +239,11 @@ app = Starlette(
         Route("/", index),
         Route("/api/items", items),
         Route("/api/trace/{seq:int}", trace),
-        Route("/api/digests", digests),
         Route("/api/digest/{name}", digest),
+        Route("/api/sources", sources),
+        Route("/api/config", get_config),
+        Route("/api/config", save_config, methods=["POST"]),
+        Route("/api/archive", archive, methods=["POST"]),
         Route("/api/fetch", fetch, methods=["POST"]),
         Route("/api/score", score, methods=["POST"]),
         Route("/api/summarize", summarize, methods=["POST"]),
