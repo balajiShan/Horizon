@@ -118,7 +118,7 @@ def test_digest_data_sidecar_roundtrip(tmp_path):
 
     data = service.read_digest_data(name)
     entry = data["items"][0]
-    assert entry["seq"] == 4 and entry["score"] == 7.0 and entry["tags"] == ["Rust"]
+    assert entry["seq"] == 4 and entry["score"] == 7.0 and entry["tags"] == ["rust"]
     assert entry["feed"] == "Lobsters" and entry["title"] == "Rustc&#x27;s <b>solver</b>"  # stored raw; UI uses textContent
     assert service.read_digest_data("digest-20261125T130000-en.md") is None  # older digest, no sidecar
     with pytest.raises(ValueError):
@@ -185,7 +185,7 @@ def test_view_has_card_fields(store):
     assert view["feed"] == "Lobsters" and view["excerpt"] == "Hello world" and view["tags"] == []
     store.save_scored("a", tagged(a, ["Rust"]), signature="s")
     view = store.list_items(signature="s")[0]
-    assert view["summary"] == "sum" and view["tags"] == ["Rust"]
+    assert view["summary"] == "sum" and view["tags"] == ["rust"]
 
 
 def test_database_without_archived_column_is_migrated(tmp_path):
@@ -336,3 +336,13 @@ def test_fetch_requires_ui_header_and_validates_hours(ui_client):
     assert ui_client.post("/api/fetch", json={"hours": 6, "sources": ["rss"]}).status_code == 403
     response = ui_client.post("/api/fetch", json={"hours": 9999, "sources": ["rss"]}, headers=HEADERS)
     assert response.status_code == 400 and "hours" in response.json()["error"]
+
+
+def test_tag_variants_collapse_to_one_kebab_case_form(store):
+    a, b = item("a", "https://x.com/1"), item("b", "https://x.com/2")
+    store.upsert_items([a, b], "r")
+    store.save_scored("a", tagged(a, ["Software Engineering"]), signature="s")
+    store.save_scored("b", tagged(b, ["#software_engineering", "AI"]), signature="s")
+    for variant in ("software-engineering", "Software Engineering", "software_engineering"):
+        assert sorted(r["seq"] for r in store.list_items(signature="s", tags=[variant])) == [1, 2]
+    assert store.tag_facets(signature="s")[0] == {"tag": "software-engineering", "key": "software-engineering", "count": 2}

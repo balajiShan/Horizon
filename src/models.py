@@ -55,6 +55,21 @@ class ClassificationResult(BaseModel):
     reason: Optional[str] = None
 
 
+def normalize_tag(tag: object) -> str:
+    """Canonical tag form: lowercase kebab-case, no leading '#'.
+
+    "#Software Engineering", "software_engineering" and "Software--Engineering"
+    all become "software-engineering".
+    """
+    text = str(tag).strip().lstrip("#").strip().lower()
+    return re.sub(r"-{2,}", "-", re.sub(r"[\s_\-]+", "-", text)).strip("-")
+
+
+def normalize_tags(tags: List[object]) -> List[str]:
+    """Normalize, drop empties and de-duplicate while keeping order."""
+    return list(dict.fromkeys(t for t in (normalize_tag(t) for t in tags) if t))
+
+
 class ContentAnalysis(BaseModel):
     """Profile-driven first-pass analysis."""
 
@@ -62,6 +77,13 @@ class ContentAnalysis(BaseModel):
     reason: str
     summary: str
     tags: List[str] = Field(default_factory=list)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _canonical_tags(cls, value: Any) -> Any:
+        if isinstance(value, list) and all(isinstance(t, str) for t in value):
+            return normalize_tags(value)
+        return value  # non-string entries fall through to normal validation
 
 
 class ArtifactSource(BaseModel):

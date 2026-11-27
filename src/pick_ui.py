@@ -119,15 +119,6 @@ async def items(request: Request) -> JSONResponse:
     return JSONResponse({"items": rows, "sources": sources, "total": total, "tag_facets": facets, "counts": service().store.archive_counts()})
 
 
-async def trace(request: Request) -> JSONResponse:
-    if (blocked := await _guard(request)) is not None:
-        return blocked
-    try:
-        return JSONResponse({"steps": service().trace(int(request.path_params["seq"]))})
-    except ValueError as exc:
-        return _error(str(exc), 404)
-
-
 async def digest(request: Request) -> JSONResponse:
     if (blocked := await _guard(request)) is not None:
         return blocked
@@ -238,7 +229,6 @@ app = Starlette(
     routes=[
         Route("/", index),
         Route("/api/items", items),
-        Route("/api/trace/{seq:int}", trace),
         Route("/api/digest/{name}", digest),
         Route("/api/sources", sources),
         Route("/api/config", get_config),

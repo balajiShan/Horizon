@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .models import normalize_tag, normalize_tags
 from .orchestrator import _deduplication_url_key
 
 SCHEMA = """
@@ -66,10 +67,29 @@ class PickStore:
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(items)")}
             if "archived" not in columns:  # database created before archiving existed
                 conn.execute("ALTER TABLE items ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            self._canonicalize_stored_tags(conn)
+
+    @staticmethod
+    def _canonicalize_stored_tags(conn: sqlite3.Connection) -> int:
+        """Rewrite tags of already-scored items to the canonical form (idempotent)."""
+        changed = 0
+        for row in conn.execute("SELECT seq, scored_json FROM items WHERE scored_json IS NOT NULL").fetchall():
+            data = json.loads(row["scored_json"])
+            analysis = (data.get("processing") or {}).get("analysis")
+            tags = analysis.get("tags") if isinstance(analysis, dict) else None
+            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                continue
+            fixed = normalize_tags(tags)
+            if fixed != tags:
+                analysis["tags"] = fixed
+                conn.execute("UPDATE items SET scored_json = ? WHERE seq = ?", (json.dumps(data), row["seq"]))
+                changed += 1
+        return changed
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.path, timeout=30)
+        conn.create_function("norm_tag", 1, lambda v: normalize_tag(v) if v is not None else "", deterministic=True)
         conn.row_factory = sqlite3.Row
         try:
             with conn:
@@ -148,7 +168,7 @@ class PickStore:
 
     @staticmethod
     def norm_tag(tag: str) -> str:
-        return tag.strip().lstrip("#").strip().lower()
+        return normalize_tag(tag)
 
     def _filters(
         self, signature: str, status: str, archived: str, source: str | None, days: int | None, query: str | None
@@ -197,7 +217,7 @@ class PickStore:
         for tag in tags or []:  # every chosen tag must be present (AND)
             where.append(
                 "EXISTS (SELECT 1 FROM json_each(items.scored_json, '$.processing.analysis.tags') AS t"
-                " WHERE lower(ltrim(trim(t.value), '#')) = ?)"
+                " WHERE norm_tag(t.value) = ?)"
             )
             args.append(self.norm_tag(tag))
         order = SORTS.get(sort, SORTS["newest"])
@@ -233,7 +253,7 @@ class PickStore:
         with self._conn() as conn:
             for (blob,) in conn.execute(sql, args):
                 tags = ((json.loads(blob).get("processing") or {}).get("analysis") or {}).get("tags") or []
-                for tag in {self.norm_tag(str(t)): str(t).strip().lstrip("#") for t in tags}.items():
+                for tag in {self.norm_tag(str(t)): self.norm_tag(str(t)) for t in tags}.items():
                     key, shown = tag
                     if not key:
                         continue
@@ -264,7 +284,7 @@ class PickStore:
             "score": row["score"],
             "reason": row["reason"],
             "summary": analysis.get("summary") or "",
-            "tags": analysis.get("tags") or [],
+            "tags": normalize_tags(analysis.get("tags") or []),
             "excerpt": _excerpt(item.get("content")),
         }
 

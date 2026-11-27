@@ -239,7 +239,7 @@ async function copyText(text, btn) {
 }
 
 /* ---- tags as filters ---- */
-const tagKey = (t) => String(t).replace(/^#+/, "").trim().toLowerCase();
+const tagKey = (t) => String(t).replace(/^#+/, "").trim().toLowerCase().replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 
 function tagButton(label, extra) {
   const key = tagKey(label);
@@ -318,22 +318,6 @@ function titleNode(it) {
   }
   return el("span", "ctitle", it.title);
 }
-function tracePanel(it) {
-  const d = el("details");
-  const box = el("div");
-  d.append(el("summary", "", "why is this here?"), box);
-  d.addEventListener("toggle", async () => {
-    if (!d.open || box.childElementCount) return;
-    try {
-      const { steps } = await api("/api/trace/" + it.seq);
-      for (const st of steps) {
-        const p = el("p"); const b = el("b", "", st.step + " [" + st.result + "] ");
-        p.append(b, document.createTextNode(st.detail)); box.append(p);
-      }
-    } catch (e) { box.textContent = e.message; }
-  });
-  return d;
-}
 function itemCard(it) {
   const c = el("article", "card" + (state.selected.has(it.seq) ? " selected" : "") + (it.archived ? " archived" : ""));
 
@@ -351,7 +335,6 @@ function itemCard(it) {
   const text = it.summary || it.excerpt;
   if (text) c.append(el("p", "csum" + (it.summary ? "" : " dim"), text));
   if (it.tags && it.tags.length) c.append(tagList(it.tags));
-  c.append(tracePanel(it));
 
   const foot = el("div", "cfoot");
   const arch = el("button", "secondary", it.archived ? "Unarchive" : "Archive");

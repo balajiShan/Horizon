@@ -9,7 +9,8 @@ ANALYSIS_RULES = f"""You are a content curator evaluating an item under the supp
 - {UNTRUSTED_INPUT_RULE}
 - Base the analysis only on the supplied item and its metadata.
 {EVIDENCE_RULES}
-- Apply the profile's evaluation policy consistently."""
+- Apply the profile's evaluation policy consistently.
+- Tags must be lowercase kebab-case: words joined by single hyphens, no spaces, underscores or '#' (e.g. "software-engineering", "machine-learning")."""
 
 
 def analysis_system_prompt(profile: LoadedProfile) -> str:
